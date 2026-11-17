@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>기관 브리핑 모바일</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1a3a6b">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root{ --navy:#1a3a6b; --line:#e3e8f0; --mut:#6b7686; --bg:#f6f8fb; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;background:var(--bg);color:#1c2430}
+  header{background:var(--navy);color:#fff;padding:14px 16px;position:sticky;top:0;z-index:5}
+  header h1{margin:0;font-size:17px;font-weight:700}
+  header .sub{font-size:11px;opacity:.8;margin-top:2px}
+  main{padding:14px;max-width:720px;margin:0 auto}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  label{display:block;font-size:12px;color:var(--mut);margin-bottom:4px;font-weight:600}
+  input[type=text],input[type=date]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:15px;margin-bottom:10px}
+  .ac-wrap{position:relative}
+  .ac-list{position:absolute;left:0;right:0;top:100%;margin-top:-6px;background:#fff;border:1px solid var(--line);
+    border-radius:0 0 8px 8px;max-height:220px;overflow-y:auto;z-index:20;box-shadow:0 8px 20px rgba(20,30,50,.12);display:none}
+  .ac-list.show{display:block}
+  .ac-item{padding:9px 12px;font-size:14px;cursor:pointer;border-bottom:1px solid #f1f3f7}
+  .ac-item:last-child{border-bottom:none}
+  .ac-item:hover,.ac-item.hi{background:#f0f3f9}
+  .row2{display:flex;gap:8px}
+  .row2>div{flex:1}
+  .btns{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+  .kwbtn{border:1px solid var(--line);background:#f0f3f9;border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;color:#33405a}
+  .kwbtn.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  button.main{width:100%;padding:13px;border:none;border-radius:10px;background:var(--navy);color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+  button.main:disabled{opacity:.5}
+  .note{font-size:12px;color:var(--mut);margin-top:6px;line-height:1.5}
+  .kpi{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:10px 0}
+  .kpi>div{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fbfcfe}
+  .kpi .v{font-size:16px;font-weight:800;color:var(--navy)}
+  .kpi .l{font-size:11px;color:var(--mut)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:7px 6px;border-bottom:1px solid #eef1f6;text-align:left;white-space:nowrap}
+  th{color:var(--mut);font-weight:600;font-size:11px}
+  .num{text-align:right}
+  .scroll{overflow-x:auto}
+  .rel{border-radius:10px;padding:10px 12px;font-size:13px;margin:8px 0;background:#fbfcfe;border:1px solid var(--line)}
+  .summary{background:#f4f7fd;border:1px solid #dbe4f3;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.6;margin-bottom:8px}
+  .prog{font-size:13px;color:var(--mut);margin-top:8px;min-height:18px;white-space:pre-line}
+  h2{font-size:14px;margin:0 0 8px;color:var(--navy)}
+  .self{color:#2e7d32;font-weight:700}
+  .install-tip{font-size:12px;color:var(--mut);background:#eef2fa;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:10px;display:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>📋 기관 브리핑 모바일</h1>
+  <div class="sub">나라장터 인사이트 — 수요기관 구매내역 실시간 조회 (DB 저장 없음, 조회 시 매번 조달청에서 새로 가져옵니다)</div>
+</header>
+<main>
+  <div class="panel" id="installTip" style="display:none">
+    <div class="install-tip" id="installTipText" style="display:block">📱 아이폰: 공유 버튼 → "홈 화면에 추가" / 안드로이드 크롬: 메뉴 → "홈 화면에 추가"를 누르면 앱처럼 설치됩니다.</div>
+  </div>
+
+  <div class="panel">
+    <label>수요기관명 (입력하면 자동완성 목록이 뜹니다)</label>
+    <div class="ac-wrap">
+      <input type="text" id="inst" placeholder="예: 한국전력, 서울특별시교육청" autocomplete="off">
+      <div class="ac-list" id="acList"></div>
+    </div>
+    <label>품목명 키워드 (여러 개 선택 가능)</label>
+    <div class="btns" id="kwBtns"></div>
+    <div class="row2">
+      <div>
+        <label>시작일</label>
+        <input type="date" id="bgn" value="2023-01-01">
+      </div>
+      <div>
+        <label>종료일</label>
+        <input type="date" id="end">
+      </div>
+    </div>
+    <button class="main" id="goBtn" onclick="runBrief()">🔍 브리핑 조회</button>
+    <div class="note">⚠ 조회할 때마다 조달청 API를 매번 새로 호출합니다(캐시 없음). 기간이 길거나 키워드를 많이 선택하면 호출 수가 늘어나 시간이 걸리고 API 일일 한도를 더 빨리 씁니다. 처음에는 1년 이내로 짧게 테스트해보세요.</div>
+    <div class="prog" id="prog"></div>
+  </div>
+
+  <div id="result"></div>
+</main>
+<script>
+// 화면(GitHub Pages)과 조회 기능(Netlify Functions)이 서로 다른 주소이므로, 조회 요청은 이 주소로 보냅니다.
+// (Netlify 배포가 크레딧 문제로 아직 안 올라간 상태라면, 이 주소가 살아날 때까지 조회 버튼은 오류를 보여줍니다 — 화면은 정상 작동)
+const API_BASE = 'https://jh-g2b-brief.netlify.app';
+const fmt = n => Math.round(+n||0).toLocaleString('ko-KR');
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// ════════════════════════════════════════════════════════════════
+// 아래 순수 함수들은 netlify/functions/_data/shared.mjs 의 로직과 동일합니다(브라우저용으로 그대로 복사).
+// KW_TREE 는 서버(/meta 함수)에서 받아온 값을 그대로 씁니다.
+// ════════════════════════════════════════════════════════════════
+let KW_TREE = {};
+const isPidEntry = t => /^#\d{5,}$/.test(String(t||'').trim());
+const PROD_FAMILIES = [
+  { match: /AhnLab\s*V3/i, name: '안랩 AhnLab V3' },
+  { match: /AhnLab.*내PC지키미/i, name: '안랩 AhnLab 내PC지키미' },
+  { match: /AhnLab\s*(EPP\s*)?(Patch\s*)?Management/i, name: '안랩 AhnLab PMS(패치관리)' },
+  { match: /ZombieZERO/i, name: '엔피코어 ZombieZERO Inspector' },
+  { match: /Virus\s*Chaser\s*10/i, name: '에스지에이솔루션즈 VirusChaser 10' },
+  { match: /알약\s*(서버\s*)?5\.1|알약\s*리눅스\s*1\.1/, name: '이스트시큐리티 알약' },
+  { match: /ViRobot\s*Security|바이로봇\s*유닉스\s*\/?\s*리눅스/i, name: '하우리 ViRobot Security' },
+  { match: /TA-PRS/i, name: '아이티스테이션 TA-PRS' }
+];
+const prodKey = p => {
+  const s = String(p||'').split(',').map(x=>x.trim());
+  const full = s.join(' ');
+  for (const f of PROD_FAMILIES) { if (f.match.test(full)) return f.name; }
+  return ((s[1]||'') + ' ' + (s[2]||'')).trim() || '(미상)';
+};
+const prodDetailLabel = p => {
+  const fam = prodKey(p);
+  const s = String(p||'').split(',').map(x=>x.trim());
+  const detail = s[3] || '';
+  if (!detail || fam.indexOf(detail) !== -1) return fam;
+  return `${fam} (${detail})`;
+};
+const vendorOf = p => { const s = String(p||'').split(',').map(x=>x.trim()); return s[1] || '(미상)'; };
+const isSelfVendor = v => /에스지에이|sga/i.test(String(v||''));
+const KW_EXPAND = {
+  'viruschaser 10': ['Virus Chaser 10'],
+  '패스워드': ['Password','password','PASSWORD','비밀번호'],
+  '비밀번호': ['패스워드','Password','password'],
+  '계정관리': ['계정 관리','Account'],
+  '접근제어': ['접근통제','Access Control'],
+  '오티피': ['OTP'], '싱글사인온': ['SSO','Single Sign'],
+  'edr': ['ZombieZERO Inspector','Privacy-i EDR','AhnLab EDR','알약 EDR','Genian Insights E'],
+  '백신': ['AhnLab V3','VirusChaser 10','Virus Chaser 10','알약 5.1','알약서버 5.1','알약 리눅스 1.1','바이로봇 유닉스/리눅스','ViRobot Security','Trend Micro Deep Security 20.0',
+    'ViRobot Security and ViRobot Manager 1.0','바이로봇 유닉스/리눅스 서버2.5'],
+  'pms': ['ViRobot Patch','ComVoy PMS','알약 패치관리(PMS)','PatchChaser','패치체이서','AhnLab EPP Patch','TA-PRS V6.1','TA-PRS V5.1','AhnLab Patch Management 4.6 SP3',
+    'ViRobot Patch Management System V3.0','ComVoy PMS V4.0','알약 패치관리(PMS) 2.1','PatchChaser 2.2','AhnLab EPP Patch Management 5.0 SP1','AhnLab EPP Management 1.0 SP1'],
+  '내pc지키미': ['크로첵 내PC지키미','Genian GPI']
+};
+const CATEGORY_LIST = ['EDR','백신','PMS','내PC지키미','자료저장방지솔루션'];
+const KW_GROUPS = {
+  '엔드포인트': ['EDR','백신','PMS','내PC지키미','자료저장방지솔루션'],
+  '엔드포인트보안': ['EDR','백신','PMS','내PC지키미','자료저장방지솔루션'],
+  'endpoint': ['EDR','백신','PMS','내PC지키미','자료저장방지솔루션']
+};
+const categoryOf = k => { const t=String(k||'').trim(); for (const c of CATEGORY_LIST){ if (t===c||t.toLowerCase()===c.toLowerCase()) return c; } return null; };
+function kwTreeGet(){ return KW_TREE; }
+const GENERIC_VENDORS = new Set(['기타','미상','(미상)','기타등등']);
+function searchPairsOfCategory(group, cat){
+  const t = kwTreeGet(); const vendors = (t[group]||{})[cat]||{};
+  const pairs=[], seen=new Set();
+  const push=(term,label,auto)=>{ const k=String(term||'').trim(); if(!k||seen.has(k.toLowerCase())) return; seen.add(k.toLowerCase()); pairs.push({term:k,label,auto:!!auto}); };
+  for (const v of Object.keys(vendors)){
+    const items = vendors[v]||[]; let hasPid=false;
+    for (const it of items){ const str=String(it||'').trim(); if (isPidEntry(str)){ hasPid=true; continue; } push(str,cat); }
+    if (hasPid && !GENERIC_VENDORS.has(v)) push(v,cat,true);
+    else if (hasPid) push(cat,cat,true);
+  }
+  return pairs;
+}
+function kwLookupByName(name){
+  const t=kwTreeGet(), key=String(name||'').trim().toLowerCase();
+  for (const g of Object.keys(t)){
+    if (g.toLowerCase()===key){ const pairs=[]; for (const c of Object.keys(t[g]||{})) pairs.push(...searchPairsOfCategory(g,c)); return {kind:'group',group:g,terms:pairs.map(x=>x.term),pairs}; }
+  }
+  for (const g of Object.keys(t)){
+    for (const c of Object.keys(t[g]||{})){
+      if (c.toLowerCase()===key){ const pairs=searchPairsOfCategory(g,c); return {kind:'cat',group:g,cat:c,terms:pairs.map(x=>x.term),pairs}; }
+    }
+  }
+  return null;
+}
+function expandGroups(kws){
+  const out=[];
+  for (const k of kws){
+    const t=String(k||'').trim();
+    const g = Object.keys(KW_GROUPS).find(x=>x.toLowerCase()===t.toLowerCase());
+    if (g){ let own=null; try{own=kwLookupByName(t);}catch(e){} if (own&&own.terms&&own.terms.length) out.push(t); else out.push(...KW_GROUPS[g]); }
+    else out.push(t);
+  }
+  return [...new Set(out.filter(Boolean))];
+}
+function expandKeywordsTagged(kws){
+  const out=[]; const seen=new Set();
+  const add=(term,category,auto)=>{ const key=term+'|'+category; if (seen.has(key)) return; seen.add(key); out.push({term,category,auto:!!auto}); };
+  for (const k of expandGroups(kws)){
+    const cat = categoryOf(k) || k;
+    let isGroupName=false;
+    try{ const h=kwLookupByName(k); if (h&&h.kind==='group'&&h.terms.length) isGroupName=true; }catch(e){}
+    if (!isGroupName) add(k,cat);
+    let treeHit=false;
+    try{ const hit=kwLookupByName(k); if (hit&&hit.pairs&&hit.pairs.length){ treeHit=true; for (const pr of hit.pairs) add(pr.term,pr.label,pr.auto); } }catch(e){}
+    if (treeHit) continue;
+    for (const [base,alts] of Object.entries(KW_EXPAND)){
+      if (k===base || k.toLowerCase()===base.toLowerCase()){ for (const a of alts) add(a,cat); }
+    }
+    if (/^[A-Za-z ]+$/.test(k)){ const capd=k[0].toUpperCase()+k.slice(1).toLowerCase(); for (const v of [k.toLowerCase(),k.toUpperCase(),capd]) add(v,cat); }
+  }
+  return out;
+}
+const pad = n => String(n).padStart(2,'0');
+const ymd = d => '' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate());
+function parseLocal(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
+function monthRanges(bgn,end){
+  const out=[]; let cur=parseLocal(bgn); const last=parseLocal(end);
+  while (cur<=last){ const mEnd=new Date(cur.getFullYear(),cur.getMonth()+1,0); const e = mEnd<last?mEnd:last;
+    out.push({b:ymd(cur), e:ymd(e), month: cur.getFullYear()+'-'+pad(cur.getMonth()+1)});
+    cur = new Date(cur.getFullYear(), cur.getMonth()+1, 1);
+  }
+  return out;
+}
+function buildBrief(inst, rows){
+  const mine = rows;
+  const totAmt = mine.reduce((s,r)=>s+(+r.incAmt||0),0);
+  const noSet = new Set(mine.map(r=>r.no));
+  const dates = mine.map(r=>r.date).filter(Boolean).sort();
+  const firstD = dates[0], lastD = dates[dates.length-1];
+  let selfAmt=0, selfLast='';
+  const vAgg=new Map(), cAgg=new Map(), yAgg=new Map();
+  for (const r of mine){
+    const amt = (+r.incAmt||0);
+    const vendor = r.vendor || vendorOf(r.prdct);
+    const cat = r.category || '기타';
+    const y = String(r.date||'').slice(0,4);
+    if (isSelfVendor(vendor)){ selfAmt += amt; if ((r.date||'')>selfLast) selfLast = r.date; }
+    vAgg.set(vendor||'(미상)', (vAgg.get(vendor||'(미상)')||0)+amt);
+    const _ck = cat||'(기타)'; if (!cAgg.has(_ck)) cAgg.set(_ck, {amt:0, vendors:new Map()});
+    const _co = cAgg.get(_ck); _co.amt += amt; _co.vendors.set(vendor||'(미상)', (_co.vendors.get(vendor||'(미상)')||0)+amt);
+    yAgg.set(y, (yAgg.get(y)||0)+amt);
+  }
+  const vTop=[...vAgg.entries()].sort((a,b)=>b[1]-a[1]);
+  const cTop=[...cAgg.entries()].sort((a,b)=>b[1].amt-a[1].amt);
+  const yArr=[...yAgg.entries()].sort((a,b)=>a[0]<b[0]?-1:1);
+  const selfShare = totAmt ? (100*selfAmt/totAmt) : 0;
+  const end = new Date();
+  const daysSinceSelf = selfLast ? Math.floor((end - new Date(selfLast)) / 86400000) : Infinity;
+  const moSinceSelf = Math.max(0, Math.round(daysSinceSelf/30));
+  let rel, relColor;
+  if (selfAmt<=0){ rel='미거래 (경쟁사만 구매) — 신규 공략 대상'; relColor='#c62828'; }
+  else if (daysSinceSelf>400){ rel=`자사 고객이나 최근 재구매 없음 — 갱신 관리 필요 (마지막 자사 거래 ${selfLast}, 약 ${moSinceSelf}개월 전)`; relColor='#e65100'; }
+  else { rel=`자사 고객 · 자사 비중 ${selfShare.toFixed(1)}% (최근 자사 거래 ${selfLast})`; relColor='#2e7d32'; }
+  const pct = a => totAmt ? (100*a/totAmt).toFixed(1)+'%' : '-';
+  const topV = vTop[0] ? `${vTop[0][0]} (${pct(vTop[0][1])})` : '-';
+  const selfCats=[], compCats=[];
+  for (const [cat,o] of cTop){
+    const vs=[...o.vendors.entries()].sort((a,b)=>b[1]-a[1]);
+    const selfInCat = [...o.vendors.entries()].filter(([v])=>isSelfVendor(v)).reduce((s,[,a])=>s+a,0);
+    if (selfInCat>0){ if (vs[0]&&isSelfVendor(vs[0][0])) selfCats.push(cat); else compCats.push(`${cat}(경쟁 우위: ${vs[0][0]})`); }
+    else if (vs[0]) compCats.push(`${cat}(${vs[0][0]})`);
+  }
+  return {
+    inst, totAmt, cnt:noSet.size, firstD: firstD||'-', lastD: lastD||'-',
+    selfAmt, selfShare, selfLast, rel, relColor, topV,
+    vTop: vTop.map(([k,v])=>({vendor:k, amt:v, pct:pct(v), self:isSelfVendor(k)})),
+    cTop: cTop.map(([k,o])=>({cat:k, vendors:[...o.vendors.entries()].sort((a,b)=>b[1]-a[1]).map(([v,amt])=>({vendor:v, amt, pct:pct(amt), self:isSelfVendor(v)}))})),
+    yArr: yArr.map(([k,v])=>({year:k, amt:v})),
+    selfCatsSummary: selfCats.join(', ')||'없음',
+    compCatsSummary: compCats.join(', ')||'없음',
+    rows: mine.slice().sort((a,b)=>(a.date<b.date?1:-1)).map(r=>({date:r.date, name:r.name, product: prodDetailLabel(r.prdct), corp:r.corp, qty:r.qty, uprc:r.uprc, amt:r.incAmt}))
+  };
+}
+
+// ════════════════════════════════════════════════════════════════
+// 수요기관명 자동완성
+// ════════════════════════════════════════════════════════════════
+let INSTITUTIONS = [];
+let AC_MATCHES = [], AC_HI = -1;
+function acRender(matches){
+  const box = document.getElementById('acList');
+  AC_MATCHES = matches; AC_HI = -1;
+  if (!matches.length){ box.classList.remove('show'); box.innerHTML=''; return; }
+  box.innerHTML = matches.map((m,i)=>`<div class="ac-item" data-i="${i}" onmousedown="acPick(${i})">${esc(m)}</div>`).join('');
+  box.classList.add('show');
+}
+function acOnInput(){
+  const q = document.getElementById('inst').value.trim().toLowerCase();
+  if (!q){ acRender([]); return; }
+  const m = INSTITUTIONS.filter(s => s.toLowerCase().includes(q)).slice(0,8);
+  acRender(m);
+}
+function acPick(i){
+  document.getElementById('inst').value = AC_MATCHES[i];
+  acRender([]);
+}
+document.addEventListener('keydown', (e) => {
+  if (document.activeElement && document.activeElement.id === 'inst' && AC_MATCHES.length) {
+    const box = document.getElementById('acList');
+    if (e.key === 'ArrowDown') { e.preventDefault(); AC_HI = Math.min(AC_HI+1, AC_MATCHES.length-1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); AC_HI = Math.max(AC_HI-1, 0); }
+    else if (e.key === 'Enter' && AC_HI >= 0) { e.preventDefault(); acPick(AC_HI); return; }
+    else return;
+    [...box.children].forEach((el,i)=>el.classList.toggle('hi', i===AC_HI));
+  }
+});
+document.addEventListener('click', (e) => { if (!e.target.closest('.ac-wrap')) acRender([]); });
+
+// ════════════════════════════════════════════════════════════════
+// 초기화 + 조회 실행
+// ════════════════════════════════════════════════════════════════
+let SELECTED = new Set();
+async function init(){
+  document.getElementById('end').value = new Date().toISOString().slice(0,10);
+  document.getElementById('inst').addEventListener('input', acOnInput);
+  if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch(e) {} }
+  if (!window.matchMedia('(display-mode: standalone)').matches) document.getElementById('installTip').style.display = 'block';
+  try {
+    const r = await fetch(API_BASE + '/.netlify/functions/meta');
+    const d = await r.json();
+    KW_TREE = d.tree || {};
+    INSTITUTIONS = d.institutions || [];
+    const box = document.getElementById('kwBtns');
+    box.innerHTML = '';
+    for (const c of (d.categories||[])) {
+      const b = document.createElement('button');
+      b.className = 'kwbtn' + ((d.quick||[]).includes(c) ? ' on' : '');
+      b.textContent = c;
+      b.onclick = () => { b.classList.toggle('on'); if (SELECTED.has(c)) SELECTED.delete(c); else SELECTED.add(c); };
+      box.appendChild(b);
+      if ((d.quick||[]).includes(c)) SELECTED.add(c);
+    }
+  } catch(e) {
+    document.getElementById('prog').textContent = '⚠ 서버에 연결할 수 없습니다: ' + e.message;
+  }
+}
+
+const CONCURRENCY = 6;
+async function runJobsConcurrent(jobs, onProgress){
+  const rows = [], errs = []; let done = 0, idx = 0;
+  async function worker(){
+    while (idx < jobs.length) {
+      const j = jobs[idx++];
+      try {
+        const r = await fetch(API_BASE + '/.netlify/functions/job', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ kw:j.term, category:j.category, b:j.rng.b, e:j.rng.e })
+        });
+        const d = await r.json();
+        if (d.err) errs.push({ kw:j.term, month:j.rng.month, msg:d.err });
+        for (const row of (d.rows||[])) rows.push(row);
+      } catch(e) {
+        errs.push({ kw:j.term, month:j.rng.month, msg: e.message });
+      }
+      done++; onProgress(done, jobs.length);
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(CONCURRENCY, jobs.length||1)}, worker));
+  return { rows, errs };
+}
+
+async function runBrief(){
+  const inst = document.getElementById('inst').value.trim();
+  const bgn = document.getElementById('bgn').value;
+  const end = document.getElementById('end').value;
+  const prog = document.getElementById('prog');
+  const result = document.getElementById('result');
+  if (!inst) { prog.textContent = '⚠ 수요기관명을 입력하세요.'; return; }
+  if (!SELECTED.size) { prog.textContent = '⚠ 품목명 키워드를 하나 이상 선택하세요.'; return; }
+  const btn = document.getElementById('goBtn');
+  btn.disabled = true; result.innerHTML = '';
+
+  const tagged = expandKeywordsTagged([...SELECTED]);
+  const jobs = [];
+  for (const t of tagged) for (const rng of monthRanges(bgn, end)) jobs.push({ term:t.term, category:t.category, rng });
+  if (!jobs.length) { prog.textContent = '⚠ 선택한 키워드에 등록된 검색어가 없습니다.'; btn.disabled=false; return; }
+
+  prog.textContent = `조달청에서 조회 중… 0/${jobs.length}`;
+  const { rows, errs } = await runJobsConcurrent(jobs, (done,total) => { prog.textContent = `조달청에서 조회 중… ${done}/${total}`; });
+
+  const seen = new Set();
+  const q = inst.toLowerCase();
+  const mine = [];
+  for (const r of rows) {
+    if (!String(r.inst||'').toLowerCase().includes(q)) continue;
+    const id = r.no+'|'+r.chg+'|'+r.sno+'|'+r.pid;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    mine.push(r);
+  }
+
+  btn.disabled = false;
+  if (!mine.length) {
+    prog.textContent = `'${inst}'의 선택 품목 구매 내역이 없습니다. (기관명 일부만 입력하거나 품목명 키워드를 확인해 보세요)` + (errs.length ? ` · API 오류 ${errs.length}건` : '');
+    return;
+  }
+  const brief = buildBrief(inst, mine);
+  render(brief);
+  prog.textContent = `완료 · API 호출 ${jobs.length}회` + (errs.length ? ` · 오류 ${errs.length}건` : '');
+}
+
+function render(b){
+  const result = document.getElementById('result');
+  const vRows = b.vTop.slice(0,8).map(v => `<tr><td>${v.self?'<span class="self">'+esc(v.vendor)+' (자사)</span>':esc(v.vendor)}</td><td class="num">${fmt(v.amt)}</td><td class="num">${v.pct}</td></tr>`).join('');
+  const cRows = b.cTop.map(c => c.vendors.map(v => `<tr><td>${esc(c.cat)}</td><td>${v.self?'<span class="self">'+esc(v.vendor)+' (자사)</span>':esc(v.vendor)}</td><td class="num">${fmt(v.amt)}</td><td class="num">${v.pct}</td></tr>`).join('')).join('');
+  const yRows = b.yArr.map(y => `<tr><td>${esc(y.year)}년</td><td class="num">${fmt(y.amt)}</td></tr>`).join('');
+  const hRows = b.rows.map(r => `<tr><td>${esc(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.product)}</td><td>${esc(r.corp)}</td><td class="num">${fmt(r.qty)}</td><td class="num">${fmt(r.amt)}</td></tr>`).join('');
+  const summaryText = `<b>${esc(b.inst)}</b>은(는) ${esc(b.firstD)} ~ ${esc(b.lastD)} 기간에 선택 품목을 총 <b>${fmt(b.cnt)}건 · ${fmt(b.totAmt)}원</b> 구매했습니다. 주력 공급사는 <b>${esc(b.topV)}</b>입니다.
+    자사(에스지에이솔루션즈) 공급 제품군은 <b>${esc(b.selfCatsSummary)}</b>, 경쟁사만 공급하는 제품군은 <b>${esc(b.compCatsSummary)}</b>.`;
+
+  result.innerHTML = `
+    <div class="panel">
+      <h2>${esc(b.inst)} — 브리핑</h2>
+      <div class="summary">📝 ${summaryText}</div>
+      <div class="rel" style="border-color:${b.relColor}"><b style="color:${b.relColor}">■ 자사와의 관계:</b> ${esc(b.rel)}</div>
+      <div class="kpi">
+        <div><div class="v">${fmt(b.totAmt)}원</div><div class="l">총 구매액(선택 품목)</div></div>
+        <div><div class="v">${fmt(b.cnt)}건</div><div class="l">납품요구 건수</div></div>
+        <div><div class="v">${esc(b.firstD)} ~ ${esc(b.lastD)}</div><div class="l">구매 기간</div></div>
+        <div><div class="v">${fmt(b.vTop.length)}개</div><div class="l">거래 공급사</div></div>
+        <div><div class="v">${fmt(b.selfAmt)}원</div><div class="l">자사 구매액 (${b.selfShare.toFixed(1)}%)</div></div>
+        <div><div class="v">${fmt(b.cTop.length)}종</div><div class="l">취급 제품군</div></div>
+      </div>
+    </div>
+    <div class="panel"><h2>주력 공급사 (경쟁 구도)</h2>
+      <div class="scroll"><table><thead><tr><th>공급사</th><th class="num">금액</th><th class="num">비중</th></tr></thead><tbody>${vRows}</tbody></table></div>
+    </div>
+    <div class="panel"><h2>제품군(구분)별 구매</h2>
+      <div class="scroll"><table><thead><tr><th>구분</th><th>공급사</th><th class="num">금액</th><th class="num">비중</th></tr></thead><tbody>${cRows}</tbody></table></div>
+    </div>
+    <div class="panel"><h2>연도별 구매 추이</h2>
+      <div class="scroll"><table><thead><tr><th>연도</th><th class="num">금액</th></tr></thead><tbody>${yRows}</tbody></table></div>
+    </div>
+    <div class="panel"><h2>구매 내역 (전체 ${fmt(b.cnt)}건)</h2>
+      <div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>접수일</th><th>납품요구건명</th><th>제품</th><th>공급사</th><th class="num">수량</th><th class="num">금액</th></tr></thead><tbody>${hRows}</tbody></table></div>
+    </div>
+  `;
+}
+
+init();
+</script>
+</body>
+</html>
