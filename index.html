@@ -66,6 +66,20 @@
   .badge{display:inline-block;background:#e9f0ff;color:#1a3a6b;border-radius:20px;padding:2px 10px;font-size:11px;font-weight:700;margin-left:8px}
   .refresh-link{font-size:12px;color:#2f6bff;cursor:pointer;text-decoration:underline;margin-left:8px}
   .cache-note{font-size:12px;color:var(--mut);background:#f4f7fd;border:1px solid #dbe4f3;border-radius:8px;padding:8px 10px;margin:8px 0}
+  .keybar{border:1px solid #f0c04a;background:#fff8e6;border-radius:12px;padding:12px 14px;margin-bottom:12px}
+  .keybar.ok{border-color:#bfe3c8;background:#f1faf3}
+  .keybar .krow{display:flex;gap:8px;margin-top:8px}
+  .keybar .krow input{flex:1;margin-bottom:0}
+  .keybar .kstatus{font-size:12.5px;font-weight:700;color:#9a6b00}
+  .keybar.ok .kstatus{color:#2e7d32}
+  .kwmgr-cat{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .kwmgr-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f1f3f7;font-size:13.5px}
+  .kwmgr-row:last-child{border-bottom:none}
+  .kwmgr-row .t{flex:1}
+  .kwmgr-row.hidden .t{color:#b7bec9;text-decoration:line-through}
+  .kwmgr-row .added{display:inline-block;background:#eaf3ff;color:#1a3a6b;border-radius:6px;padding:1px 6px;font-size:10.5px;margin-left:6px}
+  .kwmgr-add{display:flex;gap:8px;margin-top:10px}
+  .kwmgr-add input{flex:1;margin-bottom:0}
 </style>
 </head>
 <body>
@@ -78,9 +92,19 @@
     <div class="install-tip" id="installTipText" style="display:block">📱 아이폰: 공유 버튼 → "홈 화면에 추가" / 안드로이드 크롬: 메뉴 → "홈 화면에 추가"를 누르면 앱처럼 설치됩니다.</div>
   </div>
 
+  <div class="keybar" id="keyBar">
+    <div class="kstatus" id="keyStatus">🔑 조달청 인증키를 입력해야 조회할 수 있습니다 (최초 1회만 입력하면 이 폰에서 계속 저장되어 사용됩니다)</div>
+    <div class="krow">
+      <input type="text" id="userKeyInput" placeholder="공공데이터포털에서 발급받은 조달청 Encoding 또는 Decoding 인증키" autocomplete="off">
+      <button class="ghost sm" onclick="saveUserKey()">저장</button>
+      <button class="ghost sm" id="keyDeleteBtn" onclick="deleteUserKey()" style="display:none">삭제</button>
+    </div>
+  </div>
+
   <div class="tabbar">
     <button class="tabbtn on" id="tabBriefBtn" onclick="showTab('brief')">🔍 기관 브리핑</button>
     <button class="tabbtn" id="tabDashBtn" onclick="showTab('dash')">📊 대시보드</button>
+    <button class="tabbtn" id="tabKwMgrBtn" onclick="showTab('kwmgr')">⚙ 키워드 관리</button>
   </div>
 
   <div id="briefView">
@@ -133,6 +157,22 @@
       </div>
       <div class="summary" id="dashSummary"></div>
       <div class="scroll" style="max-height:620px"><table id="dashTable"></table></div>
+    </div>
+  </div>
+
+  <div id="kwMgrView" style="display:none">
+    <div class="panel">
+      <h2>⚙ 키워드 관리 (이 폰에서만 적용)</h2>
+      <div class="note" style="margin-top:0">여기서 추가·숨김 처리한 내용은 <b>이 폰에만</b> 저장되며, 데스크톱 앱이나 다른 기기에는 영향을 주지 않습니다. 구분을 고른 뒤, 검색에서 빼고 싶은 검색어는 "숨김" 처리하고, 새로 찾고 싶은 검색어는 아래에서 추가하세요.</div>
+      <div class="kwmgr-cat" id="kwMgrCatBtns"></div>
+      <div id="kwMgrList"></div>
+      <div class="kwmgr-add">
+        <input type="text" id="kwMgrAddInput" placeholder="추가할 검색어 입력 (예: 특정 제품명)">
+        <button class="ghost sm" onclick="kwMgrAddTerm()">+ 추가</button>
+      </div>
+      <div class="row2" style="margin-top:10px">
+        <button class="ghost sm" onclick="kwMgrResetCategory()">이 구분 초기화</button>
+      </div>
     </div>
   </div>
 </main>
@@ -372,7 +412,7 @@ async function runCacheAwareJobs(tagged, bgn, end, opts){
       try {
         const r = await fetch(API_BASE + '/.netlify/functions/job', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kw: j.term, category: j.category, b: j.rng.b, e: j.rng.e })
+          body: JSON.stringify({ kw: j.term, category: j.category, b: j.rng.b, e: j.rng.e, key: USER_API_KEY })
         });
         const d = await r.json();
         if (d.err) errs.push({ kw: j.term, month: j.rng.month, msg: d.err });
@@ -479,10 +519,133 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('click', (e) => { if (!e.target.closest('.ac-wrap')) acRender([]); });
 
 // ════════════════════════════════════════════════════════════════
+// 조달청 인증키 — 이 폰에만 저장(localStorage), 서버에는 저장하지 않고 매 조회 요청마다 함께 보냅니다.
+// (필수 입력: 키가 없으면 조회 자체가 되지 않습니다 — 공용 서버 키에 의존하지 않기 위함)
+// ════════════════════════════════════════════════════════════════
+let USER_API_KEY = '';
+function loadUserKey(){
+  try { USER_API_KEY = (localStorage.getItem('g2b_user_apikey') || '').trim(); } catch(e) { USER_API_KEY = ''; }
+  renderKeyBar();
+}
+function renderKeyBar(){
+  const bar = document.getElementById('keyBar');
+  const status = document.getElementById('keyStatus');
+  const input = document.getElementById('userKeyInput');
+  const delBtn = document.getElementById('keyDeleteBtn');
+  if (USER_API_KEY) {
+    bar.classList.add('ok');
+    status.textContent = '✅ 조달청 인증키가 이 폰에 저장되어 있습니다.';
+    input.value = USER_API_KEY;
+    delBtn.style.display = '';
+  } else {
+    bar.classList.remove('ok');
+    status.textContent = '🔑 조달청 인증키를 입력해야 조회할 수 있습니다 (최초 1회만 입력하면 이 폰에서 계속 저장되어 사용됩니다)';
+    delBtn.style.display = 'none';
+  }
+}
+function saveUserKey(){
+  const v = (document.getElementById('userKeyInput').value || '').trim();
+  if (!v) { alert('인증키를 입력해 주세요.'); return; }
+  try { localStorage.setItem('g2b_user_apikey', v); } catch(e) {}
+  USER_API_KEY = v;
+  renderKeyBar();
+}
+function deleteUserKey(){
+  try { localStorage.removeItem('g2b_user_apikey'); } catch(e) {}
+  USER_API_KEY = '';
+  document.getElementById('userKeyInput').value = '';
+  renderKeyBar();
+}
+
+// ════════════════════════════════════════════════════════════════
+// 키워드 관리 (이 폰에서만 적용되는 추가/숨김 — 데스크톱·서버 원본 키워드 트리는 건드리지 않음)
+// ════════════════════════════════════════════════════════════════
+let KW_OVERRIDES = {}; // { [category]: { hidden: string[], added: string[] } }
+let KWMGR_CAT = '';
+function loadKwOverrides(){
+  try { KW_OVERRIDES = JSON.parse(localStorage.getItem('g2b_kw_overrides') || '{}') || {}; } catch(e) { KW_OVERRIDES = {}; }
+}
+function saveKwOverrides(){ try { localStorage.setItem('g2b_kw_overrides', JSON.stringify(KW_OVERRIDES)); } catch(e) {} }
+function kwOv(cat){ if (!KW_OVERRIDES[cat]) KW_OVERRIDES[cat] = { hidden: [], added: [] }; return KW_OVERRIDES[cat]; }
+// expandKeywordsTagged()가 돌려준 원본(스냅샷) 목록에, 이 폰에서 숨긴 검색어는 빼고 추가한 검색어는 더합니다.
+// (주의: 확장된 검색어의 category는 하위 구분(예: EDR·백신·PMS)이라 사용자가 고른 키워드 자체와 다를 수 있으므로,
+//  반드시 선택한 키워드 하나씩 개별적으로 expandKeywordsTagged를 호출해 그 키워드의 재정의(KW_OVERRIDES[k])를 적용합니다
+//  — 키워드 관리 화면(renderKwMgrList)이 보여주는 기준 목록과 정확히 같은 방식이어야 숨김·추가가 실제 조회에도 일치합니다.)
+function expandKeywordsTaggedWithOverrides(kws){
+  const out = [];
+  for (const k of kws) {
+    const base = expandKeywordsTagged([k]);
+    const ov = KW_OVERRIDES[k];
+    for (const t of base) {
+      if (ov && ov.hidden.includes(t.term)) continue;
+      out.push(t);
+    }
+    if (ov) for (const a of ov.added) out.push({ term: a, category: k, auto: false });
+  }
+  return out;
+}
+function renderKwMgrCatBtns(){
+  const box = document.getElementById('kwMgrCatBtns'); if (!box) return;
+  if (!ALL_CATEGORIES.length) { box.innerHTML = '<span class="note" style="margin-top:0">구분 목록을 불러오지 못했습니다.</span>'; return; }
+  if (!KWMGR_CAT || !ALL_CATEGORIES.includes(KWMGR_CAT)) KWMGR_CAT = ALL_CATEGORIES[0];
+  box.innerHTML = ALL_CATEGORIES.map(c => `<button class="kwbtn${c===KWMGR_CAT?' on':''}" onclick="kwMgrPickCat('${c.replace(/'/g,"\\'")}')">${esc(c)}</button>`).join('');
+  renderKwMgrList();
+}
+function kwMgrPickCat(c){ KWMGR_CAT = c; renderKwMgrCatBtns(); }
+function renderKwMgrList(){
+  const box = document.getElementById('kwMgrList'); if (!box || !KWMGR_CAT) return;
+  const ov = kwOv(KWMGR_CAT);
+  const base = expandKeywordsTagged([KWMGR_CAT]);
+  const baseTerms = [...new Set(base.map(t => t.term))];
+  let html = '';
+  if (!baseTerms.length && !ov.added.length) {
+    html = '<div class="note" style="margin-top:0">등록된 검색어가 없습니다.</div>';
+  } else {
+    for (const term of baseTerms) {
+      const isHidden = ov.hidden.includes(term);
+      html += `<div class="kwmgr-row${isHidden?' hidden':''}"><span class="t">${esc(term)}</span><button class="ghost sm" onclick="kwMgrToggleHide('${term.replace(/'/g,"\\'")}')">${isHidden?'숨김 해제':'숨김'}</button></div>`;
+    }
+    for (const term of ov.added) {
+      html += `<div class="kwmgr-row"><span class="t">${esc(term)}<span class="added">내가 추가함</span></span><button class="ghost sm" onclick="kwMgrRemoveAdded('${term.replace(/'/g,"\\'")}')">삭제</button></div>`;
+    }
+  }
+  box.innerHTML = html;
+}
+function kwMgrToggleHide(term){
+  const ov = kwOv(KWMGR_CAT);
+  const i = ov.hidden.indexOf(term);
+  if (i >= 0) ov.hidden.splice(i, 1); else ov.hidden.push(term);
+  saveKwOverrides(); renderKwMgrList();
+}
+function kwMgrAddTerm(){
+  const input = document.getElementById('kwMgrAddInput');
+  const v = (input.value || '').trim();
+  if (!v || !KWMGR_CAT) return;
+  const ov = kwOv(KWMGR_CAT);
+  if (!ov.added.some(a => a.toLowerCase() === v.toLowerCase())) ov.added.push(v);
+  input.value = '';
+  saveKwOverrides(); renderKwMgrList();
+}
+function kwMgrRemoveAdded(term){
+  const ov = kwOv(KWMGR_CAT);
+  const i = ov.added.findIndex(a => a.toLowerCase() === term.toLowerCase());
+  if (i >= 0) ov.added.splice(i, 1);
+  saveKwOverrides(); renderKwMgrList();
+}
+function kwMgrResetCategory(){
+  if (!KWMGR_CAT) return;
+  if (!confirm(`"${KWMGR_CAT}"의 이 폰 설정(숨김·추가)을 모두 초기화할까요?`)) return;
+  delete KW_OVERRIDES[KWMGR_CAT];
+  saveKwOverrides(); renderKwMgrList();
+}
+
+// ════════════════════════════════════════════════════════════════
 // 초기화 + 조회 실행
 // ════════════════════════════════════════════════════════════════
 let SELECTED = new Set();
 async function init(){
+  loadUserKey();
+  loadKwOverrides();
   document.getElementById('end').value = new Date().toISOString().slice(0,10);
   document.getElementById('inst').addEventListener('input', acOnInput);
   if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch(e) {} }
@@ -513,6 +676,7 @@ async function init(){
     const savedDays = +localStorage.getItem('g2b_dash_days');
     if ([1,3,7,15,30,60,90].includes(savedDays)) DASH_DAYS = savedDays;
     renderDashKwBtns(); renderDashDayBtns();
+    renderKwMgrCatBtns();
     dashAutoCheckAndLoad();
   } catch(e) {
     document.getElementById('prog').textContent = '⚠ 서버에 연결할 수 없습니다: ' + e.message;
@@ -526,12 +690,13 @@ async function runBrief(force){
   const prog = document.getElementById('prog');
   const result = document.getElementById('result');
   const cacheNote = document.getElementById('briefCacheNote');
+  if (!USER_API_KEY) { prog.textContent = '⚠ 먼저 위에서 조달청 인증키를 입력하고 저장하세요.'; return; }
   if (!inst) { prog.textContent = '⚠ 수요기관명을 입력하세요.'; return; }
   if (!SELECTED.size) { prog.textContent = '⚠ 품목명 키워드를 하나 이상 선택하세요.'; return; }
   const btn = document.getElementById('goBtn');
   btn.disabled = true; result.innerHTML = ''; cacheNote.style.display = 'none';
 
-  const tagged = expandKeywordsTagged([...SELECTED]);
+  const tagged = expandKeywordsTaggedWithOverrides([...SELECTED]);
   if (!tagged.length) { prog.textContent = '⚠ 선택한 키워드에 등록된 검색어가 없습니다.'; btn.disabled=false; return; }
 
   prog.textContent = force ? '조달청에서 다시 받는 중…' : '조회 중…';
@@ -573,8 +738,10 @@ function ymdDash(d){ return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + 
 function showTab(which){
   document.getElementById('briefView').style.display = which === 'brief' ? '' : 'none';
   document.getElementById('dashView').style.display = which === 'dash' ? '' : 'none';
+  document.getElementById('kwMgrView').style.display = which === 'kwmgr' ? '' : 'none';
   document.getElementById('tabBriefBtn').classList.toggle('on', which === 'brief');
   document.getElementById('tabDashBtn').classList.toggle('on', which === 'dash');
+  document.getElementById('tabKwMgrBtn').classList.toggle('on', which === 'kwmgr');
 }
 function saveDashSel(){ try { localStorage.setItem('g2b_dash_sel', JSON.stringify([...DASH_SELECTED])); } catch(e) {} }
 function renderDashKwBtns(){
@@ -623,13 +790,14 @@ function toggleCorp(hd){
 async function dashLoad(force){
   const prog = document.getElementById('dashProg');
   const panel = document.getElementById('dashResultPanel');
+  if (!USER_API_KEY) { prog.textContent = '⚠ 먼저 위에서 조달청 인증키를 입력하고 저장하세요.'; return; }
   if (!DASH_SELECTED.size) { prog.textContent = '⚠ 제품을 하나 이상 선택하세요.'; if (panel) panel.style.display = 'none'; return; }
   const end = new Date(); const bgn = new Date(); bgn.setDate(bgn.getDate() - (DASH_DAYS - 1));
   const bgnS = ymdDash(bgn), endS = ymdDash(end);
   const btn = document.getElementById('dashRunBtn'); if (btn) btn.disabled = true;
   prog.textContent = force ? '조달청에서 다시 받는 중…' : '불러오는 중…';
   try {
-    const tagged = expandKeywordsTagged([...DASH_SELECTED]);
+    const tagged = expandKeywordsTaggedWithOverrides([...DASH_SELECTED]);
     if (!tagged.length) { prog.textContent = '⚠ 선택한 제품에 등록된 검색어가 없습니다.'; return; }
     const { rows, errs, liveCalls, cacheHits } = await runCacheAwareJobs(tagged, bgnS, endS, {
       forceRefresh: !!force,
@@ -678,7 +846,7 @@ function dashAutoCheckAndLoad(){
     const isWeekday = now.getDay() >= 1 && now.getDay() <= 5;
     const todayKey = ymd(now);
     const lastAuto = localStorage.getItem('g2b_dash_autodate');
-    if (isWeekday && now.getHours() >= 9 && lastAuto !== todayKey && DASH_SELECTED.size) {
+    if (isWeekday && now.getHours() >= 9 && lastAuto !== todayKey && DASH_SELECTED.size && USER_API_KEY) {
       localStorage.setItem('g2b_dash_autodate', todayKey);
       dashLoad();
     }
