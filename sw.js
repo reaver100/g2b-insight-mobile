@@ -4,7 +4,7 @@
 // 캐시된 이전 화면을 보여줍니다 — 그래야 코드를 고쳐 배포할 때마다 폰에 이미 설치된 앱도
 // 다음에 열 때 자동으로 최신 화면을 받습니다(이전에는 캐시 우선이라 자동 업데이트가 안 됐음).
 // 아이콘·매니페스트처럼 거의 안 바뀌는 파일만 캐시 우선(오프라인 지원용)으로 둡니다.
-const CACHE = 'g2b-brief-shell-v2';
+const CACHE = 'g2b-brief-shell-v3';
 const SHELL = ['./', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -27,8 +27,11 @@ self.addEventListener('fetch', (event) => {
 
   const isShellPage = event.request.mode === 'navigate' || url.pathname.endsWith('/') || url.pathname.endsWith('.html');
   if (isShellPage) {
+    // cache:'no-store' — 브라우저 자체 HTTP 캐시도 건너뛰고 항상 실제로 네트워크까지 갑니다.
+    // (GitHub Pages가 응답에 max-age=600을 붙이는데, 이게 없으면 배포 직후 최대 10분간은
+    //  브라우저가 이전 버전을 "네트워크"라고 믿고 그대로 돌려줄 수 있습니다.)
     event.respondWith(
-      fetch(event.request)
+      fetch(event.request, { cache: 'no-store' })
         .then((resp) => {
           const copy = resp.clone();
           caches.open(CACHE).then((c) => c.put(event.request, copy));
