@@ -9,7 +9,6 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{ --navy:#1a3a6b; --line:#e3e8f0; --mut:#6b7686; --bg:#f6f8fb; }
   *{box-sizing:border-box}
@@ -154,7 +153,6 @@
     <div class="panel" id="dashResultPanel" style="display:none">
       <div class="row2" style="align-items:center;justify-content:space-between;margin-bottom:8px">
         <h2 id="dashResTitle" style="margin:0">구매 내역</h2>
-        <button class="ghost sm" onclick="exportDash()" style="flex:0">⬇️ 엑셀</button>
       </div>
       <div class="summary" id="dashSummary"></div>
       <div class="scroll" style="max-height:620px"><table id="dashTable"></table></div>
@@ -435,7 +433,6 @@ async function runCacheAwareJobs(tagged, bgn, end, opts){
   await Promise.all(Array.from({length: Math.min(CONCURRENCY, jobs.length||1)}, worker));
   return { rows, errs, liveCalls: jobs.length, cacheHits };
 }
-
 function buildBrief(inst, rows){
   const mine = rows;
   const totAmt = mine.reduce((s,r)=>s+(+r.incAmt||0),0);
@@ -520,7 +517,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 document.addEventListener('click', (e) => { if (!e.target.closest('.ac-wrap')) acRender([]); });
-
 // ════════════════════════════════════════════════════════════════
 // 조달청 인증키 — 이 폰에만 저장(localStorage), 서버에는 저장하지 않고 매 조회 요청마다 함께 보냅니다.
 // (필수 입력: 키가 없으면 조회 자체가 되지 않습니다 — 공용 서버 키에 의존하지 않기 위함)
@@ -641,7 +637,6 @@ function kwMgrResetCategory(){
   delete KW_OVERRIDES[KWMGR_CAT];
   saveKwOverrides(); renderKwMgrList();
 }
-
 // ════════════════════════════════════════════════════════════════
 // 초기화 + 조회 실행
 // ════════════════════════════════════════════════════════════════
@@ -731,7 +726,6 @@ async function runBrief(force){
   render(brief);
   prog.textContent = `완료` + (errs.length ? ` · 오류 ${errs.length}건` : '');
 }
-
 // ════════════════════════════════════════════════════════════════
 // 대시보드 (기간별 구매내역) — 제품 여러 개 동시 선택, 모든 수요기관 대상 집계
 // ════════════════════════════════════════════════════════════════
@@ -829,19 +823,6 @@ function renderDashTable(rows){
   const corpAgg = groupSum(rows, r=>r.corp);
   renderCorpTable(rows, corpAgg, t);
 }
-function exportDash(){
-  if (!DASH_ROWS.length) { alert('먼저 불러오기를 눌러 데이터를 받아오세요.'); return; }
-  if (typeof XLSX === 'undefined') { alert('엑셀 내보내기 기능을 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.'); return; }
-  const sorted = [...DASH_ROWS].sort((a,b)=> String(b.date||'').localeCompare(String(a.date||'')));
-  const data = sorted.map(r => ({
-    접수일: r.date, 납품요구건명: r.name, 수요기관: r.inst, 제품: r.pk||prodKey(r.prdct),
-    공급사: r.corp, 수량: +r.qty||0, 단가: +r.uprc||0, '금액(원)': +r.incAmt||0
-  }));
-  const ws = XLSX.utils.json_to_sheet(data);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '대시보드');
-  XLSX.writeFile(wb, `대시보드_최근${DASH_DAYS}일.xlsx`);
-}
 // 평일 오전 9시 이후 앱을 열면(그날 처음일 때만) 자동으로 한 번 불러옵니다 — 서버 예약 없이 클라이언트에서만 확인하므로 추가 비용이 없습니다.
 function dashAutoCheckAndLoad(){
   try {
@@ -855,7 +836,6 @@ function dashAutoCheckAndLoad(){
     }
   } catch(e) {}
 }
-
 function render(b){
   const result = document.getElementById('result');
   const vRows = b.vTop.slice(0,8).map(v => `<tr><td>${v.self?'<span class="self">'+esc(v.vendor)+' (자사)</span>':esc(v.vendor)}</td><td class="num">${fmt(v.amt)}</td><td class="num">${v.pct}</td></tr>`).join('');
