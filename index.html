@@ -80,6 +80,7 @@
   .kwmgr-row .added{display:inline-block;background:#eaf3ff;color:#1a3a6b;border-radius:6px;padding:1px 6px;font-size:10.5px;margin-left:6px}
   .kwmgr-add{display:flex;gap:8px;margin-top:10px}
   .kwmgr-add input{flex:1;margin-bottom:0}
+  .footer-ver{text-align:center;font-size:11px;color:var(--mut);margin:18px 0 8px}
 </style>
 </head>
 <body>
@@ -175,6 +176,8 @@
       </div>
     </div>
   </div>
+
+  <div class="footer-ver">업데이트: 2026-11-17</div>
 </main>
 <script>
 // 화면(GitHub Pages)과 조회 기능(Netlify Functions)이 서로 다른 주소이므로, 조회 요청은 이 주소로 보냅니다.
@@ -671,7 +674,7 @@ async function init(){
     QUICK_LIST = (d.quick || []).filter(c => ALL_CATEGORIES.includes(c));
     try {
       const savedSel = JSON.parse(localStorage.getItem('g2b_dash_sel') || 'null');
-      DASH_SELECTED = new Set(Array.isArray(savedSel) ? savedSel.filter(x => QUICK_LIST.includes(x)) : QUICK_LIST);
+      DASH_SELECTED = new Set(Array.isArray(savedSel) ? savedSel.filter(x => ALL_CATEGORIES.includes(x)) : QUICK_LIST);
     } catch(e) { DASH_SELECTED = new Set(QUICK_LIST); }
     const savedDays = +localStorage.getItem('g2b_dash_days');
     if ([1,3,7,15,30,60,90].includes(savedDays)) DASH_DAYS = savedDays;
@@ -746,14 +749,14 @@ function showTab(which){
 function saveDashSel(){ try { localStorage.setItem('g2b_dash_sel', JSON.stringify([...DASH_SELECTED])); } catch(e) {} }
 function renderDashKwBtns(){
   const box = document.getElementById('dashKwBtns'); if (!box) return;
-  if (!QUICK_LIST.length) { box.innerHTML = '<span class="note" style="margin-top:0">제품 목록을 불러오지 못했습니다.</span>'; return; }
-  box.innerHTML = QUICK_LIST.map(n => {
+  if (!ALL_CATEGORIES.length) { box.innerHTML = '<span class="note" style="margin-top:0">제품 목록을 불러오지 못했습니다.</span>'; return; }
+  box.innerHTML = ALL_CATEGORIES.map(n => {
     const on = DASH_SELECTED.has(n) ? ' on' : '';
     return `<button class="kwbtn${on}" onclick="dashToggleKw('${n.replace(/'/g,"\\'")}')">${esc(n)}</button>`;
   }).join('');
 }
 function dashToggleKw(n){ if (DASH_SELECTED.has(n)) DASH_SELECTED.delete(n); else DASH_SELECTED.add(n); saveDashSel(); renderDashKwBtns(); }
-function dashSelectAll(on){ DASH_SELECTED = on ? new Set(QUICK_LIST) : new Set(); saveDashSel(); renderDashKwBtns(); }
+function dashSelectAll(on){ DASH_SELECTED = on ? new Set(ALL_CATEGORIES) : new Set(); saveDashSel(); renderDashKwBtns(); }
 function renderDashDayBtns(){
   const box = document.getElementById('dashDayBtns'); if (!box) return;
   box.innerHTML = [1,3,7,15,30,60,90].map(d => `<button class="${DASH_DAYS===d?'on':''}" onclick="dashSetDays(${d})">${d}일</button>`).join('');
