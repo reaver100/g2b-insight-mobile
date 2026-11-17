@@ -171,7 +171,11 @@
       </div>
       <div class="row2" style="margin-top:10px">
         <button class="ghost sm" onclick="kwMgrResetCategory()">이 구분 초기화</button>
+        <button class="ghost sm" onclick="scanNewProducts(this)">✨ 신규 상품 확인(이 대분류 전체)</button>
       </div>
+      <div class="note" style="margin-top:6px">벤더별로 최근 등록된 납품 이력 중 아직 키워드로 안 잡힌 품목이 있는지 조달청에서 직접 조회합니다 (벤더 수만큼 API를 호출하므로 인증키의 일일 호출 한도를 씁니다 — 필요할 때만 눌러주세요). 승인하면 이 폰뿐 아니라 실제 검색 결과에도 바로 반영됩니다.</div>
+      <div class="prog" id="scanProg"></div>
+      <div id="newProdList"></div>
     </div>
   </div>
 
@@ -433,6 +437,7 @@ async function runCacheAwareJobs(tagged, bgn, end, opts){
   await Promise.all(Array.from({length: Math.min(CONCURRENCY, jobs.length||1)}, worker));
   return { rows, errs, liveCalls: jobs.length, cacheHits };
 }
+
 function buildBrief(inst, rows){
   const mine = rows;
   const totAmt = mine.reduce((s,r)=>s+(+r.incAmt||0),0);
@@ -483,7 +488,6 @@ function buildBrief(inst, rows){
     rows: mine.slice().sort((a,b)=>(a.date<b.date?1:-1)).map(r=>({date:r.date, name:r.name, product: prodDetailLabel(r.prdct), corp:r.corp, qty:r.qty, uprc:r.uprc, amt:r.incAmt}))
   };
 }
-
 // ════════════════════════════════════════════════════════════════
 // 수요기관명 자동완성
 // ════════════════════════════════════════════════════════════════
@@ -517,6 +521,7 @@ document.addEventListener('keydown', (e) => {
   }
 });
 document.addEventListener('click', (e) => { if (!e.target.closest('.ac-wrap')) acRender([]); });
+
 // ════════════════════════════════════════════════════════════════
 // 조달청 인증키 — 이 폰에만 저장(localStorage), 서버에는 저장하지 않고 매 조회 요청마다 함께 보냅니다.
 // (필수 입력: 키가 없으면 조회 자체가 되지 않습니다 — 공용 서버 키에 의존하지 않기 위함)
@@ -637,6 +642,110 @@ function kwMgrResetCategory(){
   delete KW_OVERRIDES[KWMGR_CAT];
   saveKwOverrides(); renderKwMgrList();
 }
+// ════════════════════════════════════════════════════════════════
+// 신규 상품 확인 — 선택한 대분류 안의 벤더들을 조달청 API로 직접 조회해서
+// 아직 키워드(물품식별번호 허용목록)에 없는 품목을 찾아, 승인하면 서버(Netlify Blobs)에
+// 바로 반영합니다(배포 불필요 — 승인 즉시 모든 조회에 적용). 무시한 품목은 이 폰에서만
+// 다시 뜨지 않도록 기억합니다(서버에는 기록하지 않음).
+// ════════════════════════════════════════════════════════════════
+let NEWPROD_PENDING = [];
+let NEWPROD_SCANNING = false;
+function newProdDismissedGet(){
+  try { const v = JSON.parse(localStorage.getItem('g2b_newprod_dismissed')); return Array.isArray(v) ? v : []; } catch(e) { return []; }
+}
+function newProdDismissedAdd(pid){
+  const arr = newProdDismissedGet(), k = String(pid);
+  if (arr.indexOf(k) < 0) { arr.push(k); try { localStorage.setItem('g2b_newprod_dismissed', JSON.stringify(arr)); } catch(e) {} }
+}
+async function scanNewProducts(btn){
+  const prog = document.getElementById('scanProg');
+  if (NEWPROD_SCANNING) return;
+  if (!USER_API_KEY) { prog.textContent = '⚠ 먼저 위에서 조달청 인증키를 입력하고 저장하세요.'; return; }
+  if (!KWMGR_CAT || !KW_TREE[KWMGR_CAT]) { prog.textContent = '⚠ 먼저 위에서 대분류를 선택하세요.'; return; }
+  const group = KWMGR_CAT;
+  const tasks = [];
+  for (const cat of Object.keys(KW_TREE[group] || {})) {
+    for (const vendor of Object.keys(KW_TREE[group][cat] || {})) {
+      if (GENERIC_VENDORS.has(vendor)) continue; // "기타/미상" 등은 벤더명으로 검색할 수 없어 제외
+      tasks.push({ group, cat, vendor });
+    }
+  }
+  if (!tasks.length) { prog.textContent = '⚠ 이 대분류에는 검사할 벤더가 없습니다.'; return; }
+  // 최근 60일(월 단위로 나눠서 조회 — 조달청 API가 너무 긴 기간은 한 번에 못 받을 수 있음)
+  const end = new Date(); const bgn = new Date(); bgn.setDate(bgn.getDate() - 59);
+  const ranges = monthRanges(ymdDash(bgn), ymdDash(end));
+  const jobs = [];
+  for (const t of tasks) for (const rng of ranges) jobs.push({ ...t, rng });
+
+  NEWPROD_SCANNING = true;
+  if (btn) btn.disabled = true;
+  const dismissed = new Set(newProdDismissedGet());
+  const found = new Map(); // pid -> item
+  let done = 0, idx = 0, errCount = 0;
+  prog.textContent = `벤더 ${tasks.length}곳 조회 중… 0/${jobs.length}`;
+  async function worker(){
+    while (idx < jobs.length) {
+      const j = jobs[idx++];
+      try {
+        const r = await fetch(API_BASE + '/.netlify/functions/scan', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vendor: j.vendor, group: j.group, cat: j.cat, b: j.rng.b, e: j.rng.e, key: USER_API_KEY })
+        });
+        const d = await r.json();
+        if (d.err) errCount++;
+        for (const it of (d.items || [])) {
+          if (dismissed.has(String(it.pid))) continue;
+          const prev = found.get(it.pid);
+          if (!prev) found.set(it.pid, it);
+          else { prev.amt += it.amt || 0; if ((it.lastDate||'') > prev.lastDate) prev.lastDate = it.lastDate; }
+        }
+      } catch(e) { errCount++; }
+      done++; prog.textContent = `벤더 ${tasks.length}곳 조회 중… ${done}/${jobs.length}`;
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(4, jobs.length||1)}, worker));
+  NEWPROD_SCANNING = false;
+  if (btn) btn.disabled = false;
+  NEWPROD_PENDING = [...found.values()];
+  prog.textContent = `완료 · 신규 미등록 품목 ${NEWPROD_PENDING.length}건 발견` + (errCount ? ` · 오류 ${errCount}건` : '');
+  renderNewProdList();
+}
+function renderNewProdList(){
+  const box = document.getElementById('newProdList'); if (!box) return;
+  if (!NEWPROD_PENDING.length) { box.innerHTML = ''; return; }
+  const rows = NEWPROD_PENDING.slice().sort((a,b)=>(b.amt||0)-(a.amt||0));
+  box.innerHTML = rows.map(it => `
+    <div class="kwmgr-row" data-pid="${esc(it.pid)}">
+      <span class="t">${esc(it.cat)} › ${esc(it.vendor)} — ${esc(it.prdct)}<br>
+        <span style="color:var(--mut);font-size:11.5px">식별번호 ${esc(it.pid)} · 누적 ${fmt(it.amt)}원 · 최근 ${esc(it.lastDate)}</span></span>
+      <button class="ghost sm" onclick="approveNewProd('${esc(it.pid)}')">✅ 승인</button>
+      <button class="ghost sm" onclick="dismissNewProd('${esc(it.pid)}')">✖ 무시</button>
+    </div>`).join('');
+}
+async function approveNewProd(pid){
+  const it = NEWPROD_PENDING.find(x => String(x.pid) === String(pid));
+  if (!it) return;
+  const prog = document.getElementById('scanProg');
+  try {
+    const r = await fetch(API_BASE + '/.netlify/functions/approve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: it.cat, pid: it.pid, group: it.group, vendor: it.vendor, prdct: it.prdct, key: USER_API_KEY })
+    });
+    const d = await r.json();
+    if (!d.ok) { prog.textContent = '⚠ 승인 실패: ' + (d.error || '알 수 없는 오류'); return; }
+    NEWPROD_PENDING = NEWPROD_PENDING.filter(x => String(x.pid) !== String(pid));
+    prog.textContent = `✅ "${it.prdct}" 승인 완료 — 바로 검색에 반영됩니다.`;
+    renderNewProdList();
+  } catch(e) {
+    prog.textContent = '⚠ 승인 실패(네트워크): ' + e.message;
+  }
+}
+function dismissNewProd(pid){
+  newProdDismissedAdd(pid);
+  NEWPROD_PENDING = NEWPROD_PENDING.filter(x => String(x.pid) !== String(pid));
+  renderNewProdList();
+}
+
 // ════════════════════════════════════════════════════════════════
 // 초기화 + 조회 실행
 // ════════════════════════════════════════════════════════════════
@@ -836,6 +945,7 @@ function dashAutoCheckAndLoad(){
     }
   } catch(e) {}
 }
+
 function render(b){
   const result = document.getElementById('result');
   const vRows = b.vTop.slice(0,8).map(v => `<tr><td>${v.self?'<span class="self">'+esc(v.vendor)+' (자사)</span>':esc(v.vendor)}</td><td class="num">${fmt(v.amt)}</td><td class="num">${v.pct}</td></tr>`).join('');
