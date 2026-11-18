@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>기관 브리핑 모바일</title>
+<title>나라장터 인사이트 모바일</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1a3a6b">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -84,7 +84,7 @@
 </head>
 <body>
 <header>
-  <h1>📋 기관 브리핑 모바일</h1>
+  <h1>📋 나라장터 인사이트 모바일</h1>
   <div class="sub">나라장터 인사이트 — 수요기관 구매내역 조회 · 대시보드 (조회한 자료는 폰에 저장되어 다음부터는 빠르게 뜹니다)</div>
 </header>
 <main>
@@ -327,7 +327,9 @@ function idbDB(){
   }).catch(e => { _idbPromise = null; throw e; });
   return _idbPromise;
 }
-function dayKey(term, category, day){ return term + '|' + category + '|' + day; }
+// wide(이 폰에서 추가한 검색어) 여부를 캐시 키에 포함합니다 — 이전에 이미 저장된 "일반" 캐시와
+// 혼동되지 않도록(같은 검색어라도 wide 여부에 따라 서버가 돌려주는 허용 기준이 다르기 때문입니다).
+function dayKey(term, category, day, wide){ return term + '|' + category + (wide ? '|w' : '') + '|' + day; }
 // cat은 더 이상 캐시 키에 포함하지 않습니다 — 같은 벤더는 대분류 안 어느 구분 작업에서 걸리든
 // 조달청 조회 결과가 동일하므로(벤더명 기준 조회), 벤더당 한 번만 조회·저장합니다.
 // (각 품목이 실제로 어느 구분에 속하는지는 scan.mjs가 품명으로 직접 판정해서 돌려줍니다.)
@@ -400,7 +402,7 @@ async function getRowsCacheAware(tagged, bgn, end, opts){
   const cachedRows = []; const jobs = []; let cacheHits = 0;
   for (const t of tagged) {
     const days = daysBetween8(bgnY, endY);
-    const keys = days.map(d => dayKey(t.term, t.category, d));
+    const keys = days.map(d => dayKey(t.term, t.category, d, t.wide));
     const cached = opts.forceRefresh ? {} : await idbGetMany(keys);
     const missing = [];
     for (let i = 0; i < days.length; i++) {
@@ -410,7 +412,7 @@ async function getRowsCacheAware(tagged, bgn, end, opts){
       for (const row of entry.rows) cachedRows.push(row);
     }
     for (const seg of contiguousSegments(missing)) {
-      for (const rng of monthRanges(dash8(seg.b), dash8(seg.e))) jobs.push({ term: t.term, category: t.category, rng });
+      for (const rng of monthRanges(dash8(seg.b), dash8(seg.e))) jobs.push({ term: t.term, category: t.category, rng, wide: t.wide });
     }
   }
   return { cachedRows, jobs, cacheHits };
@@ -429,7 +431,7 @@ async function runCacheAwareJobs(tagged, bgn, end, opts){
       try {
         const r = await fetch(API_BASE + '/.netlify/functions/job', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kw: j.term, category: j.category, b: j.rng.b, e: j.rng.e, key: USER_API_KEY })
+          body: JSON.stringify({ kw: j.term, category: j.category, b: j.rng.b, e: j.rng.e, key: USER_API_KEY, wide: !!j.wide })
         });
         const d = await r.json();
         if (d.err) errs.push({ kw: j.term, month: j.rng.month, msg: d.err });
@@ -438,7 +440,7 @@ async function runCacheAwareJobs(tagged, bgn, end, opts){
         // 받아온 자료를 날짜별로 쪼개 폰에 저장 — 다음부터는 이 구간을 다시 API로 받지 않습니다.
         const byDay = bucketRowsByDay(jobRows);
         const toPut = [];
-        for (const d2 of daysBetween8(j.rng.b, j.rng.e)) toPut.push([dayKey(j.term, j.category, d2), { rows: byDay.get(d2) || [], fetchedAt: Date.now() }]);
+        for (const d2 of daysBetween8(j.rng.b, j.rng.e)) toPut.push([dayKey(j.term, j.category, d2, j.wide), { rows: byDay.get(d2) || [], fetchedAt: Date.now() }]);
         await idbPutMany(toPut);
       } catch(e) {
         errs.push({ kw: j.term, month: j.rng.month, msg: e.message });
@@ -597,7 +599,10 @@ function expandKeywordsTaggedWithOverrides(kws){
       if (ov && ov.hidden.includes(t.term)) continue;
       out.push(t);
     }
-    if (ov) for (const a of ov.added) out.push({ term: a, category: k, auto: false });
+    // wide: true — 이 폰에서 직접 추가한 검색어는 아직 물품식별번호가 서버 허용목록에 등록돼 있지 않다.
+    // job.mjs가 이 표시를 보면 pid 대조 대신 실제 품명으로 이 구분에 해당하는지 판정해서 통과시킨다
+    // (그래야 추가한 키워드가 기관 브리핑·대시보드에도 바로 나타난다).
+    if (ov) for (const a of ov.added) out.push({ term: a, category: k, auto: false, wide: true });
   }
   return out;
 }
