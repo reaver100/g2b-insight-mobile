@@ -179,7 +179,7 @@
     </div>
   </div>
 
-  <div class="footer-ver">업데이트: 2026-11-17</div>
+  <div class="footer-ver">업데이트: 2026-11-18</div>
 </main>
 <script>
 // 화면(GitHub Pages)과 조회 기능(Netlify Functions)이 서로 다른 주소이므로, 조회 요청은 이 주소로 보냅니다.
@@ -310,27 +310,38 @@ function monthRanges(bgn,end){
 // 다음 조회부터는 이미 저장된 날짜는 그대로 쓰고, 저장되지 않은 날짜만 조달청 API로 받아옵니다.
 // 기관 브리핑과 대시보드가 같은 저장소를 공유합니다 — 한 번 받은 자료는 어느 화면에서든 재사용됩니다.
 // ════════════════════════════════════════════════════════════════
-const IDB_NAME = 'g2b_cache_v1', IDB_STORE = 'jobDays';
+const IDB_NAME = 'g2b_cache_v1', IDB_STORE = 'jobDays', IDB_SCAN_STORE = 'scanDays';
 let _idbPromise = null;
 function idbDB(){
   if (_idbPromise) return _idbPromise;
   _idbPromise = new Promise((resolve, reject) => {
     if (!('indexedDB' in window)) { reject(new Error('IndexedDB 미지원')); return; }
-    const req = indexedDB.open(IDB_NAME, 1);
-    req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
+    const req = indexedDB.open(IDB_NAME, 2);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+      if (!db.objectStoreNames.contains(IDB_SCAN_STORE)) db.createObjectStore(IDB_SCAN_STORE);
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   }).catch(e => { _idbPromise = null; throw e; });
   return _idbPromise;
 }
 function dayKey(term, category, day){ return term + '|' + category + '|' + day; }
+// cat은 더 이상 캐시 키에 포함하지 않습니다 — 같은 벤더는 대분류 안 어느 구분 작업에서 걸리든
+// 조달청 조회 결과가 동일하므로(벤더명 기준 조회), 벤더당 한 번만 조회·저장합니다.
+// (각 품목이 실제로 어느 구분에 속하는지는 scan.mjs가 품명으로 직접 판정해서 돌려줍니다.)
+function scanDayKey(group, vendor, day){ return group + '|' + vendor + '|' + day; }
 // IndexedDB를 쓸 수 없는 환경(사생활 보호 모드 등)에서는 조용히 캐시 없이 동작합니다(항상 API로 받아옴).
-async function idbGetMany(keys){
+// storeName을 생략하면 기존 "기관 브리핑·대시보드" 저장소(jobDays)를 쓰고, "신규 상품 확인"은
+// 별도 저장소(scanDays)를 지정해 호출합니다 — 같은 IndexedDB 안에 저장소만 나눈 것입니다.
+async function idbGetMany(keys, storeName){
+  storeName = storeName || IDB_STORE;
   try {
     const db = await idbDB();
     return await new Promise((resolve) => {
-      const tx = db.transaction(IDB_STORE, 'readonly');
-      const store = tx.objectStore(IDB_STORE);
+      const tx = db.transaction(storeName, 'readonly');
+      const store = tx.objectStore(storeName);
       const out = {}; let pending = keys.length;
       if (!pending) { resolve(out); return; }
       keys.forEach(k => {
@@ -341,12 +352,13 @@ async function idbGetMany(keys){
     });
   } catch(e) { return {}; }
 }
-async function idbPutMany(entries){
+async function idbPutMany(entries, storeName){
+  storeName = storeName || IDB_STORE;
   try {
     const db = await idbDB();
     await new Promise((resolve, reject) => {
-      const tx = db.transaction(IDB_STORE, 'readwrite');
-      entries.forEach(([k, v]) => tx.objectStore(IDB_STORE).put(v, k));
+      const tx = db.transaction(storeName, 'readwrite');
+      entries.forEach(([k, v]) => tx.objectStore(storeName).put(v, k));
       tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
     });
   } catch(e) { /* 저장 실패해도 조회 자체는 계속 진행 */ }
@@ -488,6 +500,7 @@ function buildBrief(inst, rows){
     rows: mine.slice().sort((a,b)=>(a.date<b.date?1:-1)).map(r=>({date:r.date, name:r.name, product: prodDetailLabel(r.prdct), corp:r.corp, qty:r.qty, uprc:r.uprc, amt:r.incAmt}))
   };
 }
+
 // ════════════════════════════════════════════════════════════════
 // 수요기관명 자동완성
 // ════════════════════════════════════════════════════════════════
@@ -642,6 +655,7 @@ function kwMgrResetCategory(){
   delete KW_OVERRIDES[KWMGR_CAT];
   saveKwOverrides(); renderKwMgrList();
 }
+
 // ════════════════════════════════════════════════════════════════
 // 신규 상품 확인 — 선택한 대분류 안의 벤더들을 조달청 API로 직접 조회해서
 // 아직 키워드(물품식별번호 허용목록)에 없는 품목을 찾아, 승인하면 서버(Netlify Blobs)에
@@ -657,57 +671,118 @@ function newProdDismissedAdd(pid){
   const arr = newProdDismissedGet(), k = String(pid);
   if (arr.indexOf(k) < 0) { arr.push(k); try { localStorage.setItem('g2b_newprod_dismissed', JSON.stringify(arr)); } catch(e) {} }
 }
-async function scanNewProducts(btn){
+// 이 폰에서 방금 승인한 pid 목록 — 캐시된(날짜별로 저장해둔) 스캔 결과에는 승인 이전 시점의
+// 자료가 그대로 남아있을 수 있으므로, 다음 스캔에서 그 캐시가 재사용되더라도 이미 승인한 건
+// 다시 "신규"로 보여주지 않기 위해 둡니다(실제 검색 반영 자체는 approve.mjs가 서버에 바로 기록).
+function newProdApprovedLocalGet(){
+  try { const v = JSON.parse(localStorage.getItem('g2b_newprod_approved_local')); return Array.isArray(v) ? v : []; } catch(e) { return []; }
+}
+function newProdApprovedLocalAdd(pid){
+  const arr = newProdApprovedLocalGet(), k = String(pid);
+  if (arr.indexOf(k) < 0) { arr.push(k); try { localStorage.setItem('g2b_newprod_approved_local', JSON.stringify(arr)); } catch(e) {} }
+}
+// 스캔 결과를 (대분류·구분·벤더·날짜) 단위로 폰에 저장해두고, 다음 스캔부터는 이미 저장된
+// 날짜는 다시 조회하지 않습니다 — 오늘 날짜만 항상 새로 받습니다(기관 브리핑·대시보드와 같은 방식).
+// force=true면 캐시를 무시하고 전체를 다시 조회합니다("🔄 전체 다시 조회" 링크).
+async function scanNewProducts(btn, force){
   const prog = document.getElementById('scanProg');
   if (NEWPROD_SCANNING) return;
   if (!USER_API_KEY) { prog.textContent = '⚠ 먼저 위에서 조달청 인증키를 입력하고 저장하세요.'; return; }
   if (!KWMGR_CAT || !KW_TREE[KWMGR_CAT]) { prog.textContent = '⚠ 먼저 위에서 대분류를 선택하세요.'; return; }
   const group = KWMGR_CAT;
-  const tasks = [];
+  // 벤더는 대분류 안의 구분(cat)마다가 아니라 "대분류 전체" 기준으로 한 번씩만 조회합니다 —
+  // 한 벤더가 이 대분류 안에서 여러 구분에 등록돼 있어도 조달청 조회 결과는 똑같으므로,
+  // 구분별로 중복 조회하면 API 호출도 낭비되고 같은 납품 건이 여러 번 집계돼 금액이 부풀려집니다.
+  // (실제 구분 분류는 scan.mjs가 품명을 보고 판정해서 각 행에 cat으로 담아 돌려줍니다.)
+  const vendorSet = new Set();
   for (const cat of Object.keys(KW_TREE[group] || {})) {
     for (const vendor of Object.keys(KW_TREE[group][cat] || {})) {
       if (GENERIC_VENDORS.has(vendor)) continue; // "기타/미상" 등은 벤더명으로 검색할 수 없어 제외
-      tasks.push({ group, cat, vendor });
+      vendorSet.add(vendor);
     }
   }
+  const tasks = [...vendorSet].map(vendor => ({ group, vendor }));
   if (!tasks.length) { prog.textContent = '⚠ 이 대분류에는 검사할 벤더가 없습니다.'; return; }
-  // 최근 60일(월 단위로 나눠서 조회 — 조달청 API가 너무 긴 기간은 한 번에 못 받을 수 있음)
-  const end = new Date(); const bgn = new Date(); bgn.setDate(bgn.getDate() - 59);
-  const ranges = monthRanges(ymdDash(bgn), ymdDash(end));
-  const jobs = [];
-  for (const t of tasks) for (const rng of ranges) jobs.push({ ...t, rng });
+  // 최근 60일 — 하루 단위로 캐시 적중 여부를 확인하고, 저장 안 된 날짜만 월 단위로 묶어 조회합니다.
+  const endD = new Date(); const bgnD = new Date(); bgnD.setDate(bgnD.getDate() - 59);
+  const todayY = ymd(new Date());
+  const allDays = daysBetween8(ymd(bgnD), ymd(endD));
 
   NEWPROD_SCANNING = true;
   if (btn) btn.disabled = true;
   const dismissed = new Set(newProdDismissedGet());
-  const found = new Map(); // pid -> item
+  const approvedLocal = new Set(newProdApprovedLocalGet());
+  const allRawRows = []; // {date,pid,prdct,corp,amt,group,cat,vendor}
+  const jobs = [];
+  let cacheHitDays = 0;
+
+  for (const t of tasks) {
+    const keys = allDays.map(d => scanDayKey(t.group, t.vendor, d));
+    const cached = force ? {} : await idbGetMany(keys, IDB_SCAN_STORE);
+    const missing = [];
+    for (let i = 0; i < allDays.length; i++) {
+      const d = allDays[i], entry = cached[keys[i]];
+      if (!entry || d === todayY) { missing.push(d); continue; }
+      cacheHitDays++;
+      for (const row of entry.rows) allRawRows.push({ ...row, group: t.group, vendor: t.vendor });
+    }
+    for (const seg of contiguousSegments(missing)) {
+      for (const rng of monthRanges(dash8(seg.b), dash8(seg.e))) jobs.push({ ...t, rng });
+    }
+  }
+
   let done = 0, idx = 0, errCount = 0;
-  prog.textContent = `벤더 ${tasks.length}곳 조회 중… 0/${jobs.length}`;
+  prog.textContent = `벤더 ${tasks.length}곳 중 새로 조회할 구간 ${jobs.length}건… 0/${jobs.length}` + (cacheHitDays ? ` (저장된 자료 ${cacheHitDays}일치 재사용)` : '');
   async function worker(){
     while (idx < jobs.length) {
       const j = jobs[idx++];
       try {
         const r = await fetch(API_BASE + '/.netlify/functions/scan', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ vendor: j.vendor, group: j.group, cat: j.cat, b: j.rng.b, e: j.rng.e, key: USER_API_KEY })
+          body: JSON.stringify({ vendor: j.vendor, group: j.group, b: j.rng.b, e: j.rng.e, key: USER_API_KEY })
         });
         const d = await r.json();
         if (d.err) errCount++;
-        for (const it of (d.items || [])) {
-          if (dismissed.has(String(it.pid))) continue;
-          const prev = found.get(it.pid);
-          if (!prev) found.set(it.pid, it);
-          else { prev.amt += it.amt || 0; if ((it.lastDate||'') > prev.lastDate) prev.lastDate = it.lastDate; }
+        const jobRows = d.rows || []; // 각 행에 서버가 품명으로 직접 판정한 cat이 이미 담겨 있습니다.
+        for (const row of jobRows) allRawRows.push({ ...row, group: j.group, vendor: j.vendor });
+        // 날짜별로 쪼개서 폰에 저장 — 오늘 날짜는 하루 안에도 계속 늘 수 있어 저장하지 않습니다.
+        const byDay = new Map();
+        for (const row of jobRows) {
+          const dd = String(row.date || '').replace(/\D/g, '');
+          if (!byDay.has(dd)) byDay.set(dd, []);
+          byDay.get(dd).push(row);
         }
+        const toPut = [];
+        for (const d2 of daysBetween8(j.rng.b, j.rng.e)) {
+          if (d2 === todayY) continue;
+          toPut.push([scanDayKey(j.group, j.vendor, d2), { rows: byDay.get(d2) || [], fetchedAt: Date.now() }]);
+        }
+        await idbPutMany(toPut, IDB_SCAN_STORE);
       } catch(e) { errCount++; }
-      done++; prog.textContent = `벤더 ${tasks.length}곳 조회 중… ${done}/${jobs.length}`;
+      done++; prog.textContent = `벤더 ${tasks.length}곳 중 새로 조회할 구간 ${jobs.length}건… ${done}/${jobs.length}` + (cacheHitDays ? ` (저장된 자료 ${cacheHitDays}일치 재사용)` : '');
     }
   }
   await Promise.all(Array.from({length: Math.min(4, jobs.length||1)}, worker));
+
+  // pid 기준으로 합산 — 같은 품목이 여러 납품 건·여러 날짜(캐시+신규)에 걸쳐 나올 수 있습니다.
+  const byPid = new Map();
+  for (const row of allRawRows) {
+    if (!row.pid || dismissed.has(String(row.pid)) || approvedLocal.has(String(row.pid))) continue;
+    const prev = byPid.get(row.pid);
+    if (!prev) {
+      byPid.set(row.pid, { pid: row.pid, prdct: row.prdct, corp: row.corp, amt: row.amt || 0, lastDate: row.date || '', group: row.group, cat: row.cat, vendor: row.vendor });
+    } else {
+      prev.amt += row.amt || 0;
+      if ((row.date||'') > prev.lastDate) { prev.lastDate = row.date; prev.prdct = row.prdct; prev.corp = row.corp; }
+    }
+  }
+
   NEWPROD_SCANNING = false;
   if (btn) btn.disabled = false;
-  NEWPROD_PENDING = [...found.values()];
-  prog.textContent = `완료 · 신규 미등록 품목 ${NEWPROD_PENDING.length}건 발견` + (errCount ? ` · 오류 ${errCount}건` : '');
+  NEWPROD_PENDING = [...byPid.values()];
+  prog.innerHTML = `완료 · 신규 미등록 품목 ${NEWPROD_PENDING.length}건 발견 · 새로 조회 ${jobs.length}건 · 저장된 자료 재사용 ${cacheHitDays}일치` +
+    (errCount ? ` · 오류 ${errCount}건` : '') +
+    `<span class="refresh-link" onclick="scanNewProducts(null, true)">🔄 전체 다시 조회(캐시 무시)</span>`;
   renderNewProdList();
 }
 // 벤더명으로만 조회하기 때문에, 한 벤더가 여러 구분(예: 백신·서버보안)에 걸쳐 제품을 팔면
@@ -759,6 +834,7 @@ async function approveNewProd(pid){
     });
     const d = await r.json();
     if (!d.ok) { prog.textContent = '⚠ 승인 실패: ' + (d.error || '알 수 없는 오류'); return; }
+    newProdApprovedLocalAdd(it.pid);
     NEWPROD_PENDING = NEWPROD_PENDING.filter(x => String(x.pid) !== String(pid));
     prog.textContent = `✅ "${it.prdct}" (${chosenCat}) 승인 완료 — 바로 검색에 반영됩니다.`;
     renderNewProdList();
@@ -861,6 +937,7 @@ async function runBrief(force){
   render(brief);
   prog.textContent = `완료` + (errs.length ? ` · 오류 ${errs.length}건` : '');
 }
+
 // ════════════════════════════════════════════════════════════════
 // 대시보드 (기간별 구매내역) — 제품 여러 개 동시 선택, 모든 수요기관 대상 집계
 // ════════════════════════════════════════════════════════════════
