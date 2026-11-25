@@ -89,7 +89,7 @@
 </header>
 <main>
   <div class="panel" id="installTip" style="display:none">
-    <div class="install-tip" id="installTipText" style="display:block">📱 아이폰: 공유 버튼 → "홈 화면에 추가" / 안드로이드 크롬: 메뉴 → "홈 화면에 추가"를 누르면 앱처럼 설치됩니다.</div>
+    <div class="install-tip" id="installTipText" style="display:block"></div>
   </div>
 
   <div class="keybar" id="keyBar">
@@ -896,14 +896,14 @@ function dismissNewProd(pid){
 // ════════════════════════════════════════════════════════════════
 // 초기화 + 조회 실행
 // ════════════════════════════════════════════════════════════════
-let SELECTED = new Set();
+function isStandaloneApp(){ try { return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; } catch(e) { return false; } } function renderInstallTip(){ const el = document.getElementById('installTipText'); if (!el) return; const ua = navigator.userAgent || ''; const isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); if (isIOS) { el.innerHTML = '📱 <b>아이폰(Safari)에서 앱처럼 설치하는 방법</b><ol style="margin:6px 0 2px;padding-left:18px;line-height:1.6"><li>반드시 <b>Safari</b>로 이 화면을 열어주세요 — 크롬·네이버 등 다른 앱으로 열면 "홈 화면에 추가" 메뉴가 안 보일 수 있습니다.</li><li>화면 아래쪽(아이패드는 주소창 옆)의 <b>공유 아이콘</b>(네모 안에 위쪽 화살표 모양)을 누릅니다.</li><li>위로 올라오는 메뉴를 아래로 내려서 <b>"홈 화면에 추가"</b>를 찾아 누릅니다.</li><li>이름을 확인하고 오른쪽 위 <b>"추가"</b>를 누르면 완료됩니다.</li><li>홈 화면에 생긴 아이콘을 누르면 앱처럼 전체화면으로 바로 실행됩니다.</li></ol><div style="font-size:11px;color:var(--mut)">※ iOS 버전에 따라 버튼 위치·문구가 조금 다를 수 있습니다.</div>'; } else { el.innerHTML = '📱 <b>안드로이드(Chrome)에서 앱처럼 설치하는 방법</b><ol style="margin:6px 0 2px;padding-left:18px;line-height:1.6"><li>주소창 오른쪽에 <b>설치 아이콘</b>이 보이면 바로 눌러 설치할 수 있습니다.</li><li>안 보이면 오른쪽 위 <b>점 3개(⋮) 메뉴</b>를 누릅니다.</li><li>메뉴에서 <b>"앱 설치"</b> 또는 <b>"홈 화면에 추가"</b>를 누릅니다.</li><li>확인 창에서 <b>"설치"</b>(또는 "추가")를 누르면 완료됩니다.</li><li>홈 화면이나 앱 서랍에 생긴 아이콘을 누르면 앱처럼 바로 실행됩니다.</li></ol><div style="font-size:11px;color:var(--mut)">※ 기기·Chrome 버전에 따라 메뉴 문구가 조금 다를 수 있습니다.</div>'; } } let SELECTED = new Set();
 async function init(){
   loadUserKey();
   loadKwOverrides();
   document.getElementById('end').value = new Date().toISOString().slice(0,10);
   document.getElementById('inst').addEventListener('input', acOnInput);
   if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch(e) {} }
-  if (!window.matchMedia('(display-mode: standalone)').matches) document.getElementById('installTip').style.display = 'block';
+  if (!isStandaloneApp()) { document.getElementById('installTip').style.display = 'block'; renderInstallTip(); } /* 아이콘 실행(standalone)이면 설치 안내 숨김 — iOS는 navigator.standalone도 함께 확인 */
   try {
     // meta(품목·기관 목록)와 kwOverrides(다른 폰에서의 키워드 관리 설정)를 동시에 받아옵니다 —
     // syncKwOverridesFromServer()가 끝나야 KW_OVERRIDES가 최신 상태가 되어, 아래 renderKwMgrCatBtns()가
